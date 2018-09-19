@@ -1,0 +1,11 @@
+[package]
+name = "triangle"
+version = "0.1.0"
+authors = ["Duret Jarod <jarod.duret@univ-avignon.fr>"]
+
+repository = "https://github.com/CHAM0/"
+
+[dependencies]
+vulkano = "0.10"
+vulkano-win = "0.10"
+winit = "0.17"
