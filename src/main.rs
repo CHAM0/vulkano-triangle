@@ -1,13 +1,17 @@
+#[macro_use]
 extern crate vulkano;
 extern crate winit;
 extern crate vulkano_win;
+#[macro_use]
+extern crate vulkano_shader_derive;
 
 use std::sync::Arc;
 use vulkano::instance::{ Instance, InstanceExtensions, ApplicationInfo, Version, PhysicalDevice, Features };
 use vulkano::device::{ Device, DeviceExtensions, Queue};
-use vulkano::swapchain::{ Surface };
-
+use vulkano::swapchain::{ Surface, Swapchain, SurfaceTransform, PresentMode };
+use vulkano::image::{ SwapchainImage };
 use vulkano_win::VkSurfaceBuild;
+use vulkano::buffer::{ BufferUsage, CpuAccessibleBuffer };
 use winit::{ EventsLoop, WindowBuilder, dpi::LogicalSize, Window };
 
 
@@ -22,7 +26,8 @@ pub struct Triangle {
     surface: Arc<Surface<Window>>,
     physical_device_index: u32,
     device: Arc<Device>,
-    queue: Arc<Queue>,
+    graphic_queue: Arc<Queue>,
+    present_queue: Arc<Queue>,
 }
 
 impl Triangle {
@@ -30,15 +35,18 @@ impl Triangle {
         let instance = Self::create_instance();
         let (events_loop, surface) = Self::create_surface(&instance);
         let physical_device_index = Self::pick_physical_device(&instance);
-        let (device, queue) = Self::create_logical_device(&instance, physical_device_index);
-        
+        let (device, graphic_queue, present_queue) = Self::create_logical_device(&instance, physical_device_index);
+        let (swapchain, swapchain_images) = Self::create_swap_chain(&instance, &surface, physical_device_index, &device, &graphic_queue);
+        Self::create_graphics_pipeline(&device);
+
         Self {
             instance,
             events_loop,
             surface,
             physical_device_index,
             device,
-            queue,
+            graphic_queue,
+            present_queue,
         }
     }
 
@@ -115,40 +123,78 @@ impl Triangle {
     }
 
     fn create_logical_device(instance: &Arc<Instance>, physical_device_index: u32)
-        -> (Arc<Device>, Arc<Queue>) {
+        -> (Arc<Device>, Arc<Queue>, Arc<Queue>) {
             let physical = PhysicalDevice::from_index(&instance, physical_device_index as usize).unwrap();
             let indices = Self::find_queue_families(&physical).unwrap();
 
             let queue_family = physical.queue_family_by_id(indices).unwrap();
 
-            let (device, mut queues) = match Device::new(physical, &Features::none(), &DeviceExtensions::none(),
+            let device_ext = DeviceExtensions {
+                khr_swapchain: true,
+                .. vulkano::device::DeviceExtensions::none()
+            };
+
+            let (device, mut queues) = match Device::new(physical, &Features::none(), &device_ext,
                 [(queue_family, 0.5)].iter().cloned()) {
                     Ok(i) => i,
                     Err(err) => panic!("Failed to create device: {:?}", err),
             };
 
             // Get our queue 
-            let queue = queues.next().unwrap();
+            let graphic_queue = queues.next().unwrap();
+            let present_queue = queues.next().unwrap_or_else(|| graphic_queue.clone());
 
-            (device, queue)
-        }       
+            (device, graphic_queue, present_queue)
+    }
+
+    fn create_swap_chain (
+        instance: &Arc<Instance>,
+        surface: &Arc<Surface<Window>>,
+        physical_device_index: u32,
+        device: &Arc<Device>,
+        graphic_queue: &Arc<Queue>,
+        ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
+            let physical_device = PhysicalDevice::from_index(&instance, physical_device_index as usize).unwrap();
+            let caps = surface.capabilities(physical_device)
+                .expect("Failed to get surface capabilities");
+
+            let dimensions = caps.current_extent.unwrap_or([1280, 1024]);
+            let alpha = caps.supported_composite_alpha.iter().next().unwrap();
+            let format = caps.supported_formats[0].0;
+            let image_count = caps.min_image_count;
+            let image_usage = caps.supported_usage_flags;
+
+            let (swapchain, images) = Swapchain::new(device.clone(), surface.clone(), image_count,
+                format, dimensions, 1, image_usage, graphic_queue, caps.current_transform,
+                alpha, PresentMode::Fifo, true, None).expect("Failed to create swapchain");
+            
+            (swapchain, images)
+    }
+
+    fn create_graphics_pipeline(device: &Arc<Device>) {
+        let vertex_buffer = {
+            #[derive(Debug,Clone)]
+            struct Vertex { position: [f32;2] }
+            impl_vertex!(Vertex, position);
+
+            let vertex_positions = [ 
+                Vertex { position: [0.0, -0.5] },
+                Vertex { position: [0.5, 0.5] },
+                Vertex { position: [-0.5, 0.5] }
+
+            ];
+
+            CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(),
+                vertex_positions
+                    .into_iter()
+                    .cloned())
+                .expect("Failed to create buffer");
+        };
+
+        
+    }
 }
 
-fn create_swap_chain (
-    instance: &Arc<Instance>,
-    surface: &Arc<Surface<Window>>,
-    physical_device_index: u32,
-    ) {
-        let physical_device = PhysicalDevice::from_index(&instance, physical_device_index as usize).unwrap();
-        let caps = surface.capabilities(physical_device)
-            .expect("Failed to get surface capabilities");
-
-        let dimensions = caps.current_extent.unwrap_or([1280, 1024]);
-        let alpha = caps.supported_composite_alpha.iter().next().unwrap();
-        let format = caps.supported_formats[0].0;
-
-         
-}
 
 
 
