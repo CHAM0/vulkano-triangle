@@ -424,7 +424,6 @@ impl Triangle {
     
     fn draw_frame(&mut self) {
         let (image_index, acquire_future) = acquire_next_image(self.swapchain.clone(), None).unwrap();
-
         let command_buffer = self.command_buffers[image_index].clone();
 
         let future = acquire_future
