@@ -49,6 +49,8 @@ pub struct Triangle {
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
     vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
     graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
+    second_vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
+    second_graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
     swapchain_framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
 
@@ -63,6 +65,7 @@ impl Triangle {
         let (swapchain, swapchain_images) = Self::create_swap_chain(&instance, &surface, physical_device_index, &device, &graphic_queue);
         let render_pass = Self::create_render_pass(&device, swapchain.format());
         let (vertex_buffer, graphics_pipeline) = Self::create_graphics_pipeline(&device, swapchain.dimensions(), &render_pass);
+        let (second_vertex_buffer, second_graphics_pipeline) = Self::create_second_graphics_pipeline(&device, swapchain.dimensions(), &render_pass);
         let swapchain_framebuffers = Self::create_framebuffers(&swapchain_images, &render_pass);
 
         let mut app = Self {
@@ -84,6 +87,9 @@ impl Triangle {
             render_pass,
             vertex_buffer,
             graphics_pipeline,
+
+            second_vertex_buffer,
+            second_graphics_pipeline,
 
             swapchain_framebuffers,
 
@@ -280,6 +286,71 @@ impl Triangle {
         (vertex_buffer, graphics_pipeline)
     }
 
+    fn create_second_graphics_pipeline(device: &Arc<Device>, swap_chain_extent: [u32; 2],
+        render_pass: &Arc<RenderPassAbstract + Send + Sync>) -> ( Arc<CpuAccessibleBuffer<[Vertex]>>, Arc<ConcreteGraphicsPipeline>) {
+
+        let vertex_positions = [ 
+            Vertex { position: [-0.8, -0.4] },
+            Vertex { position: [-0.4, -0.4] },
+            Vertex { position: [-0.8, -0.8] },
+            Vertex { position: [-0.8, -0.8] },
+            Vertex { position: [-0.4, -0.4] },
+            Vertex { position: [-0.4, -0.8] },
+
+        ];
+
+        let vertex_buffer = CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(),
+            vertex_positions
+                .into_iter()
+                .cloned())
+            .expect("Failed to create buffer");
+
+        #[allow(unused)]
+        mod vs {
+            #[derive(VulkanoShader)]
+            #[ty = "vertex"]
+            #[path = "src/shaders/vertex_shader.glsl"]
+            #[allow(dead_code)]
+
+            struct Dummy;
+        }
+        #[allow(unused)]
+        mod fs {
+            #[derive(VulkanoShader)]
+            #[ty = "fragment"]
+            #[path = "src/shaders/fragment_shader.glsl"]
+            #[allow(dead_code)]
+
+            struct Dummy;
+        }
+
+        let vs = vs::Shader::load(device.clone())
+            .expect("Failed to create shader module");
+        let fs = fs::Shader::load(device.clone())
+            .expect("Failed to create shader module");
+
+        
+        let dimensions = [swap_chain_extent[0] as f32, swap_chain_extent[1] as f32];
+        let viewport = Viewport {
+            origin: [0.0, 0.0],
+            dimensions,
+            depth_range: 0.0 .. 1.0,
+        };
+
+
+        let graphics_pipeline = Arc::new(GraphicsPipeline::start()
+            .vertex_input_single_buffer::<Vertex>()
+            .vertex_shader(vs.main_entry_point(), ())
+            .viewports_dynamic_scissors_irrelevant(1)
+            .fragment_shader(fs.main_entry_point(), ())
+            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .build(device.clone())
+            .unwrap()
+        );
+
+        (vertex_buffer, graphics_pipeline)
+    }
+
     fn create_render_pass(device: &Arc<Device>, color_format: Format)
         -> Arc<RenderPassAbstract + Send + Sync> {
         
@@ -338,6 +409,9 @@ impl Triangle {
                     .draw(self.graphics_pipeline.clone(), &dynamic_state,
                         self.vertex_buffer.clone(), (), ())
                     .unwrap()
+                    .draw(self.second_graphics_pipeline.clone(), &dynamic_state,
+                        self.second_vertex_buffer.clone(), (), ())
+                    .unwrap()         
                     .end_render_pass()
                     .unwrap()
                     .build()
@@ -345,6 +419,8 @@ impl Triangle {
             })
             .collect();       
     }
+
+
     
     fn draw_frame(&mut self) {
         let (image_index, acquire_future) = acquire_next_image(self.swapchain.clone(), None).unwrap();
